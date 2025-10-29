@@ -1,49 +1,119 @@
-import { useState } from 'react';
-import { StyleSheet, Text, View, StatusBar, TextInput, Platform, Pressable, ScrollView } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons';
-import Slider from '@react-native-community/slider';
+import { useState } from 'react'
+import {
+  StyleSheet, Text, View, StatusBar, TextInput, Platform, Pressable, ScrollView,
+  ActivityIndicator, Alert, Keyboard
+} from 'react-native';
+import { MaterialIcons } from '@expo/vector-icons'
+import Slider from '@react-native-community/slider'
 
-const statusBarHeight = StatusBar.currentHeight 
-
-const [loading, setLoading]= useState(true);
-const [travel, setTravel]= useState("");
+const statusBarHeight = StatusBar.currentHeight
+const KEY_GPT = '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';
 
 export default function App() {
+
+  const [city, setCity] = useState("");
+  const [days, setDays] = useState(3);
+  const [loading, setLoading] = useState(false);
+  const [travel, setTravel] = useState("")
+
+  async function handleGenerate() {
+    if (city === "") {
+      Alert.alert("Atenção", "Preencha o nome da cidade!")
+      return;
+    }
+
+    setTravel("")
+    setLoading(true);
+    Keyboard.dismiss();
+
+    const prompt = `Crie um roteiro para uma viagem de exatos ${days.toFixed(0)} dias na cidade de ${city}, busque por lugares turisticos, lugares mais visitados, seja preciso nos dias de estadia fornecidos e limite o roteiro apenas na cidade fornecida. Forneça apenas em tópicos com nome do local onde ir em cada dia.`
+
+    try {
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${KEY_GPT}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-3.5-turbo",
+          messages: [
+            {
+              role: 'user',
+              content: prompt,
+            },
+          ],
+          temperature: 0.2,
+          max_tokens: 500,
+          top_p: 1,
+        }),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        console.error("OpenAI API error:", response.status, errText);
+        Alert.alert("Erro", "Não foi possível gerar o roteiro. Tente novamente.");
+        return;
+      }
+
+      const data = await response.json();
+      const text = data?.choices?.[0]?.message?.content ?? data?.choices?.[0]?.text ?? JSON.stringify(data);
+      setTravel(text.trim());
+    } catch (error) {
+      console.error(error);
+      Alert.alert("Erro", "Ocorreu um erro ao processar sua solicitação.");
+    } finally {
+      setLoading(false);
+    }
+
+  }
+
   return (
     <View style={styles.container}>
-      
-      <StatusBar barStyle="dark-content" translucent={true} backgroundColor="#F1F1F1"  />
+      <StatusBar barStyle="dark-content" translucent={true} backgroundColor="#F1F1F1" />
+      <Text style={styles.heading}>Roteiros fácil</Text>
 
-      <text style={styles.heading}>Roteirizando</text>
+      <View style={styles.form}>
+        <Text style={styles.label}>Cidade destino</Text>
+        <TextInput
+          placeholder="Ex: Campo Grande, MS"
+          style={styles.input}
+          value={city}
+          onChangeText={(text) => setCity(text)}
+        />
 
-      <view style={styles.form}>
-
-        <text style={styles.label}>Cidade Destino</text>
-        <TextInput placeholder='Ex: São Paulo, SP' style={styles.input} />
-
-        <text style={styles.label}>Tempo de estadia: <text style={styles.days}>10</text> dias</text>
-
+        <Text style={styles.label}>Tempo de estadia: <Text style={styles.days}> {days.toFixed(0)} </Text> dias</Text>
         <Slider
           minimumValue={1}
           maximumValue={7}
-          minimumTrackTintColor='#009688'
-          maximumTrackTintColor='#000000'
+          minimumTrackTintColor="#009688"
+          maximumTrackTintColor="#000000"
+          value={days}
+          onValueChange={(value) => setDays(value)}
         />
-      </view>
+      </View>
 
-      <Pressable style={styles.button}>
-        <text style={styles.buttonText}>Gerar Roteiro</text>
-        <MaterialIcons name="travel-explore" size={24} color="#fff" />
+      <Pressable style={styles.button} onPress={handleGenerate}>
+        <Text style={styles.buttonText}>Gerar roteiro</Text>
+        <MaterialIcons name="travel-explore" size={24} color="#FFF" />
       </Pressable>
 
-      <ScrollView contentContainerStyle={{paddingBottom: 24, marginTop: 4 }} style={styles.containerScroll} showsVerticalScrollIndicator={false}>
-        <View style={styles.content}>
-          <Text style={styles.title}>Roteiro da viagem 👇</Text>
-          <Text>
-            Lorem ipsum dolor sit amet consectetur adipisicing elit. Laudantium nemo asperiores veritatis iusto quae. Magnam ullam, ex consequatur numquam, nostrum deleniti pariatur, blanditiis in neque sequi nam exercitationem illo qui?
-          </Text>
-        </View>
+      <ScrollView contentContainerStyle={{ paddingBottom: 24, marginTop: 4, }} style={styles.containerScroll} showsVerticalScrollIndicator={false} >
+        {loading && (
+          <View style={styles.content}>
+            <Text style={styles.title}>Carregando roteiro...</Text>
+            <ActivityIndicator color="#000" size="large" />
+          </View>
+        )}
+
+        {travel && (
+          <View style={styles.content}>
+            <Text style={styles.title}>Rotreiro da viagem 👇</Text>
+            <Text style={{ lineHeight: 24, }}>{travel}</Text>
+          </View>
+        )}
       </ScrollView>
+
     </View>
   );
 }
@@ -55,28 +125,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingTop: 20,
   },
-
   heading: {
     fontSize: 32,
     fontWeight: 'bold',
     paddingTop: Platform.OS === 'android' ? statusBarHeight : 54
-  }, 
-
+  },
   form: {
-    backgroundColor: '#fff',
+    backgroundColor: '#FFF',
     width: '90%',
     borderRadius: 8,
     padding: 16,
     marginTop: 16,
     marginBottom: 8,
   },
-
   label: {
     fontWeight: 'bold',
     fontSize: 18,
     marginBottom: 8,
   },
-
   input: {
     borderWidth: 1,
     borderRadius: 4,
@@ -85,43 +151,37 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginBottom: 16,
   },
-
   days: {
-    backgroundColor: '#f1f1f1',
+    backgroundColor: '#F1f1f1'
   },
-
   button: {
-    backgroundColor: '#ff5656',
+    backgroundColor: '#FF5656',
     width: '90%',
     borderRadius: 8,
-    padding: 14,
     flexDirection: 'row',
+    padding: 14,
     justifyContent: 'center',
     alignItems: 'center',
     gap: 8,
   },
-
   buttonText: {
     fontSize: 18,
-    color: '#fff',
-    fontWeight: 'bold',
+    color: '#FFF',
+    fontWeight: 'bold'
   },
-
   content: {
-    backgroundColor: '#fff',
+    backgroundColor: '#FFF',
     padding: 16,
     width: '100%',
     marginTop: 16,
     borderRadius: 8,
   },
-
   title: {
     fontSize: 18,
     fontWeight: 'bold',
     textAlign: 'center',
-    marginBottom: 14,
+    marginBottom: 14
   },
-
   containerScroll: {
     width: '90%',
     marginTop: 8,
