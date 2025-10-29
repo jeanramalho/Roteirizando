@@ -1,8 +1,12 @@
+import { useState } from 'react';
 import { StyleSheet, Text, View, StatusBar, TextInput, Platform, Pressable, ScrollView } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import Slider from '@react-native-community/slider';
 
 const statusBarHeight = StatusBar.currentHeight 
+
+const [loading, setLoading]= useState(true);
+const [travel, setTravel]= useState("");
 
 export default function App() {
   return (
