@@ -41,7 +41,7 @@ export default function App() {
    * The model is asked to return Markdown; we render that Markdown directly.
    */
   function buildPromptMarkdown(cityName: string, daysNumber: number): string {
-    return `Gere 5 ideias de roteiros curtos para a cidade ${cityName} para ${daysNumber} dias.
+    return `Gere ${daysNumber} ideias de roteiros curtos para a cidade ${cityName} para ${daysNumber} dias.
 Responda SOMENTE em Markdown, sem explicações adicionais.
 Formato sugerido:
 **Roteiro 1 — Título**
@@ -183,9 +183,10 @@ Escreva em português.`;
       }
 
       const data = await resp.json();
-
+      const intineraryText = data.candidates[0].content.parts[0].text
+      console.log(data.candidates[0].content.parts[0].text);
       // extract and clean textual reply
-      const rawText = extractTextFromResponse(data);
+      const rawText = extractTextFromResponse(intineraryText);
       const cleaned = cleanModelText(rawText);
 
       // If the model accidentally returned a JSON, prefer to parse and render structured routes.
