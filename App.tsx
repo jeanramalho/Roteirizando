@@ -14,164 +14,134 @@ import {
 } from "react-native";
 import { MaterialIcons } from "@expo/vector-icons";
 import Slider from "@react-native-community/slider";
+import Markdown from "react-native-markdown-display";
 
 /**
- * NOTE: chave inserida apenas para desenvolvimento/local.
- * Nunca exponha chaves em builds de produção.
+ * NOTE (DEV): API key must not be shipped with production builds.
+ * Use env vars / backend proxy / secrets manager for production.
  */
 const statusBarHeight = StatusBar.currentHeight ?? 0;
 const KEY_GPT = "AIzaSyAbf4wh8xndx1i5ypZV4QzaSTiT1BsM7AI";
 
-/* Tipo para o JSON esperado do modelo */
-type DayObj = { day: number; places: string[] };
-type ItineraryRoute = { title: string; itinerary: DayObj[] };
 type ParsedRoutes = {
   city?: string;
   days?: number;
-  routes?: ItineraryRoute[];
+  routes?: Array<{ title?: string; itinerary?: Array<{ day?: number; places?: string[] }> }>;
 };
 
-export default function App(): JSX.Element {
+export default function App() {
   const [city, setCity] = useState<string>("");
   const [days, setDays] = useState<number>(3);
   const [loading, setLoading] = useState<boolean>(false);
-  const [travel, setTravel] = useState<string>(""); // fallback text
+  const [travel, setTravel] = useState<string>(""); // markdown/plain fallback
   const [routesParsed, setRoutesParsed] = useState<ParsedRoutes | null>(null);
 
   /**
-   * Build prompt that instructs the model to return ONLY a JSON object
-   * with a strict structure. Kept concise for reliability.
+   * Simple prompt requesting Markdown-only response.
+   * The model is asked to return Markdown; we render that Markdown directly.
    */
-  function buildPromptForJSON(cityName: string, daysNumber: number): string {
-    return `Por favor, gere APENAS um JSON válido (sem texto extra) com ideias de roteiros para a cidade ${cityName} para ${daysNumber} dias.
-O JSON deve ter este formato exato:
-{
-  "city": "<nome da cidade>",
-  "days": <numero de dias>,
-  "routes": [
-    {
-      "title": "<título curto do roteiro>",
-      "itinerary": [
-         {"day": 1, "places": ["Lugar A - breve", "Lugar B - breve"]},
-         {"day": 2, "places": ["Lugar C", "Lugar D"]}
-      ]
-    }
-  ]
-}
-Retorne somente o JSON.`;
+  function buildPromptMarkdown(cityName: string, daysNumber: number): string {
+    return `Gere 5 ideias de roteiros curtos para a cidade ${cityName} para ${daysNumber} dias.
+Responda SOMENTE em Markdown, sem explicações adicionais.
+Formato sugerido:
+**Roteiro 1 — Título**
+- Ponto 1
+- Ponto 2
+
+Escreva em português.`;
   }
 
   /**
-   * Robust JSON extraction strategy:
-   * - removes markdown fences
-   * - handles escaped JSON strings (\" and \\n)
-   * - attempts multiple parse passes and extracts first {...} or [...]
+   * Extract textual content from typical Gemini response shapes.
+   * Observed shapes:
+   * - data.candidates[0].content[0].parts[0].text
+   * - data.output[0].content[0].text
+   * Fall back to full stringify only for debugging.
+   */
+  function extractTextFromResponse(data: any): string {
+    try {
+      const candidateText =
+        data?.candidates?.[0]?.content?.[0]?.parts?.[0]?.text ??
+        data?.output?.[0]?.content?.[0]?.text ??
+        data?.candidates?.[0]?.content?.[0]?.text;
+      if (typeof candidateText === "string") return candidateText;
+      return JSON.stringify(data, null, 2);
+    } catch {
+      return JSON.stringify(data, null, 2);
+    }
+  }
+
+  /**
+   * Clean and unescape the model text:
+   * - remove outer quotes if present
+   * - unescape common sequences (\n, \")
+   * - remove code fences to leave raw markdown
+   */
+  function cleanModelText(raw: string): string {
+    if (!raw) return "";
+    let t = raw.trim();
+
+    if (t.startsWith('"') && t.endsWith('"')) {
+      t = t.slice(1, -1);
+    }
+
+    t = t
+      .replace(/\\n/g, "\n")
+      .replace(/\\r/g, "\r")
+      .replace(/\\t/g, "\t")
+      .replace(/\\"/g, '"')
+      .replace(/\\'/g, "'");
+
+    // Remove code fences but keep inner markdown
+    t = t.replace(/^\s*```(?:md|markdown)?\s*/i, "").replace(/\s*```\s*$/i, "");
+
+    return t.trim();
+  }
+
+  /**
+   * Try parse JSON if model accidentally returned JSON-like content.
+   * Returns parsed object or null.
    */
   function tryParseJsonFromText(text: string): ParsedRoutes | null {
-    if (!text || typeof text !== "string") return null;
-
+    if (!text) return null;
     let attempt = text.trim();
 
-    // remove markdown fences ```json ... ```
+    // remove fences
     attempt = attempt.replace(/^\s*```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "");
 
-    // if wrapped in quotes, remove outer quotes
-    if (attempt.startsWith('"') && attempt.endsWith('"')) {
-      attempt = attempt.slice(1, -1);
-    }
+    if (attempt.startsWith('"') && attempt.endsWith('"')) attempt = attempt.slice(1, -1);
 
-    // Try multiple passes: parse -> unescape -> extract block -> parse
-    for (let i = 0; i < 6; i++) {
-      // try direct JSON.parse
+    // direct parse
+    try {
+      const parsed = JSON.parse(attempt);
+      return parsed as ParsedRoutes;
+    } catch {
+      // unescape and try again
+      const unescaped = attempt
+        .replace(/\\n/g, "\n")
+        .replace(/\\r/g, "\r")
+        .replace(/\\"/g, '"');
       try {
-        const parsed = JSON.parse(attempt);
-        if (typeof parsed === "string") {
-          // parsed is still a JSON string, continue loop with its content
-          attempt = parsed;
-          continue;
-        }
-        // parsed is object/array
-        return parsed as ParsedRoutes;
+        const parsed2 = JSON.parse(unescaped);
+        return parsed2 as ParsedRoutes;
       } catch {
-        // not direct JSON; try unescaping common sequences
-        const unescaped = attempt
-          .replace(/\\n/g, "\n")
-          .replace(/\\r/g, "\r")
-          .replace(/\\t/g, "\t")
-          .replace(/\\"/g, '"')
-          .replace(/\\'/g, "'");
-
-        if (unescaped !== attempt) {
-          attempt = unescaped;
-          continue;
-        }
-
-        // try to extract first {...} block
-        const firstBrace = attempt.indexOf("{");
-        const lastBrace = attempt.lastIndexOf("}");
-        if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-          const candidate = attempt.substring(firstBrace, lastBrace + 1);
+        const braceMatch = unescaped.match(/\{[\s\S]*\}/);
+        if (braceMatch) {
           try {
-            return JSON.parse(candidate) as ParsedRoutes;
+            return JSON.parse(braceMatch[0]) as ParsedRoutes;
           } catch {
-            // ignored - fallthrough to bracket attempt
+            return null;
           }
         }
-
-        // try to extract first [...] array
-        const firstBracket = attempt.indexOf("[");
-        const lastBracket = attempt.lastIndexOf("]");
-        if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
-          const candidateArr = attempt.substring(firstBracket, lastBracket + 1);
-          try {
-            const parsedArr = JSON.parse(candidateArr);
-            // if top-level is array but our structure expects object with routes,
-            // try to wrap it: { routes: parsedArr }
-            if (Array.isArray(parsedArr)) {
-              return { routes: parsedArr } as ParsedRoutes;
-            }
-          } catch {
-            // ignored
-          }
-        }
-
-        // no progress; break loop
-        break;
+        return null;
       }
     }
-
-    // final aggressive regex extraction
-    const braceMatch = attempt.match(/\{[\s\S]*\}/);
-    if (braceMatch) {
-      try {
-        return JSON.parse(braceMatch[0]) as ParsedRoutes;
-      } catch {
-        // ignored
-      }
-    }
-
-    return null;
   }
 
   /**
-   * Fallback text formatter: if the response can be parsed into JSON,
-   * return pretty-printed JSON. Otherwise return trimmed text.
-   */
-  function makePrettyFallback(text: string): string {
-    const parsed = tryParseJsonFromText(text);
-    if (parsed) {
-      try {
-        return JSON.stringify(parsed, null, 2);
-      } catch {
-        // fallback to raw trimmed text
-      }
-    }
-    return text.trim();
-  }
-
-  /**
-   * Primary action: calls Gemini REST endpoint directly and processes result.
-   * generationConfig is used per Gemini REST expectations.
+   * Primary action: call Gemini, extract and clean text, then:
+   * - if JSON-like structure detected, render parsed routes
+   * - otherwise render Markdown cleaned text via Markdown renderer
    */
   async function handleGenerate(): Promise<void> {
     if (city.trim() === "") {
@@ -184,7 +154,7 @@ Retorne somente o JSON.`;
     setLoading(true);
     Keyboard.dismiss();
 
-    const prompt = buildPromptForJSON(city.trim(), Number(days.toFixed(0)));
+    const prompt = buildPromptMarkdown(city.trim(), Number(days.toFixed(0)));
 
     try {
       const resp = await fetch(
@@ -201,7 +171,7 @@ Retorne somente o JSON.`;
               temperature: 0.2,
               topP: 1.0,
               topK: 40,
-              responseMimeType: "application/json",
+              responseMimeType: "text/plain", // allowed mime type; model can still return Markdown
             },
           }),
         }
@@ -214,36 +184,24 @@ Retorne somente o JSON.`;
 
       const data = await resp.json();
 
-      // attempt to extract main textual content from possible shapes
-      // Candidate shapes observed: data.candidates[0].content[0].parts[0].text
-      // or data.output[0].content[0].text, etc.
-      let text: string;
-      try {
-        text =
-          (data?.candidates?.[0]?.content?.[0]?.parts?.[0]?.text as string) ??
-          (data?.output?.[0]?.content?.[0]?.text as string) ??
-          (data?.candidates?.[0]?.content?.[0]?.text as string) ??
-          JSON.stringify(data);
-      } catch {
-        text = JSON.stringify(data);
-      }
+      // extract and clean textual reply
+      const rawText = extractTextFromResponse(data);
+      const cleaned = cleanModelText(rawText);
 
-      // first attempt: robust parse
-      const parsed = tryParseJsonFromText(String(text));
-
-      if (parsed && parsed.routes && Array.isArray(parsed.routes) && parsed.routes.length > 0) {
+      // If the model accidentally returned a JSON, prefer to parse and render structured routes.
+      const parsed = tryParseJsonFromText(cleaned);
+      if (parsed && parsed.routes && parsed.routes.length > 0) {
         setRoutesParsed(parsed);
         setTravel("");
       } else {
-        // fallback: produce pretty string (either pretty JSON or cleaned text)
-        const pretty = makePrettyFallback(String(text));
+        // Render Markdown directly using markdown renderer
         setRoutesParsed(null);
-        setTravel(pretty);
+        setTravel(cleaned);
       }
     } catch (err: any) {
       console.error("handleGenerate error:", err);
       setRoutesParsed(null);
-      setTravel("Ocorreu um erro ao gerar o roteiro. Verifique o console para detalhes.");
+      setTravel("Ocorreu um erro ao gerar o roteiro. Verifique a console para detalhes.");
       Alert.alert("Erro", String(err?.message ?? err));
     } finally {
       setLoading(false);
@@ -251,8 +209,7 @@ Retorne somente o JSON.`;
   }
 
   /**
-   * Renders parsed routes with clear hierarchy: route title -> day -> places.
-   * Keeps layout and spacing consistent with original design.
+   * Render parsed routes while keeping original layout.
    */
   function RenderParsedRoutes({ parsed }: { parsed: ParsedRoutes | null }) {
     if (!parsed) return null;
@@ -328,11 +285,7 @@ Retorne somente o JSON.`;
         <MaterialIcons name="travel-explore" size={24} color="#FFF" />
       </Pressable>
 
-      <ScrollView
-        contentContainerStyle={{ paddingBottom: 24, marginTop: 4 }}
-        style={styles.containerScroll}
-        showsVerticalScrollIndicator={false}
-      >
+      <ScrollView contentContainerStyle={{ paddingBottom: 24, marginTop: 4 }} style={styles.containerScroll} showsVerticalScrollIndicator={false}>
         {loading && (
           <View style={styles.content}>
             <Text style={styles.title}>Carregando roteiro...</Text>
@@ -340,12 +293,18 @@ Retorne somente o JSON.`;
           </View>
         )}
 
-        {routesParsed ? <RenderParsedRoutes parsed={routesParsed} /> : null}
+        {routesParsed ? (
+          <RenderParsedRoutes parsed={routesParsed} />
+        ) : null}
 
         {!routesParsed && travel ? (
           <View style={styles.content}>
             <Text style={styles.title}>Roteiro da viagem 👇</Text>
-            <Text style={{ lineHeight: 24, fontFamily: undefined }}>{travel}</Text>
+
+            {/* Render Markdown content (cleaned). Keeps visual fidelity (bold, lists). */}
+            <Markdown>
+              {travel}
+            </Markdown>
           </View>
         ) : null}
       </ScrollView>
