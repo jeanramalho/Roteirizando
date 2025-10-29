@@ -21,7 +21,7 @@ import Markdown from "react-native-markdown-display";
  * Use env vars / backend proxy / secrets manager for production.
  */
 const statusBarHeight = StatusBar.currentHeight ?? 0;
-const KEY_GPT = "AIzaSyAbf4wh8xndx1i5ypZV4QzaSTiT1BsM7AI";
+const KEY_GPT = "api-key-here";
 
 type ParsedRoutes = {
   city?: string;
@@ -184,7 +184,7 @@ Escreva em português.`;
 
       const data = await resp.json();
       const intineraryText = data.candidates[0].content.parts[0].text
-      console.log(data.candidates[0].content.parts[0].text);
+      // console.log(data.candidates[0].content.parts[0].text);
       // extract and clean textual reply
       const rawText = extractTextFromResponse(intineraryText);
       const cleaned = cleanModelText(rawText);
@@ -310,9 +310,6 @@ Escreva em português.`;
         ) : null}
       </ScrollView>
 
-      <Text style={{ fontSize: 12, color: "#666", marginTop: 8, width: "90%", textAlign: "center" }}>
-        Nota: este app realiza a chamada DIRETA ao modelo. Não coloque a chave no app em produção.
-      </Text>
     </View>
   );
 }
