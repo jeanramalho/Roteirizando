@@ -65,6 +65,47 @@ O app estará disponível via **Expo Go** no seu smartphone ou no emulador.
 
 ---
 
+## 🏗️ Arquitetura Técnica
+
+### Stack Principal
+
+```
+┌─────────────────────────────────────┐
+│   React Native + Expo (v54)        │
+│   TypeScript (Strict Mode)          │
+└─────────────────────────────────────┘
+              │
+              ▼
+┌─────────────────────────────────────┐
+│   Gemini 2.5 Flash API              │
+│   (generativelanguage.googleapis)   │
+└─────────────────────────────────────┘
+              │
+              ▼
+┌─────────────────────────────────────┐
+│   Markdown Renderer                 │
+│   (react-native-markdown-display)   │
+└─────────────────────────────────────┘
+```
+
+### Fluxo de Dados
+
+1. **Input Layer** — Captura cidade e dias via componentes nativos (TextInput + Slider)
+2. **Validation Layer** — Valida inputs antes de requisição à API
+3. **API Layer** — Constrói prompt otimizado e comunica com Gemini API via HTTP POST
+4. **Processing Layer** — Extrai, limpa e parseia resposta (suporta JSON e Markdown)
+5. **Presentation Layer** — Renderiza conteúdo formatado com tratamento de estados (loading/error/success)
+
+### Decisões Técnicas
+
+- **Gemini 2.5 Flash** — Escolhido por latência reduzida (2-4s) e custo-benefício superior ao GPT-4, ideal para apps mobile que exigem respostas rápidas
+- **Markdown Nativo** — Preferência por `react-native-markdown-display` em vez de WebView para melhor performance e experiência nativa
+- **Parsing Resiliente** — Implementação de múltiplos fallbacks para lidar com variações na resposta da API (JSON malformado, escaping, code fences)
+- **State Management Local** — `useState` é suficiente dado o escopo do app, evitando overhead de Redux/Zustand
+- **TypeScript Strict Mode** — Garante type safety e reduz bugs em produção
+
+---
+
 ## 📡 Funcionalidades
 
 ### 🌍 Geração de Roteiros Personalizados
